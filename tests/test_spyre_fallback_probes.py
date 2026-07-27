@@ -226,9 +226,7 @@ def test_spyre_indirect_matmul_tensor_index(spyre_device):
     num_blocks = 4
     query_len = 32
 
-    q = torch.randn(
-        1, num_kv_heads, query_len, head_size, dtype=torch.float16, device=spyre_device
-    )
+    q = torch.randn(1, num_kv_heads, query_len, head_size, dtype=torch.float16, device=spyre_device)
     k_pages = torch.randn(
         num_blocks,
         num_kv_heads,
