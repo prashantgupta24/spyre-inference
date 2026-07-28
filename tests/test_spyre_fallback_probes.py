@@ -239,14 +239,14 @@ def test_spyre_indirect_matmul_tensor_index(spyre_device):
 
     @torch.compile(dynamic=False)
     def page_attn(q, k_pages, page_idx):
-        k_page = k_pages[page_idx].unsqueeze(0).transpose(-2, -1)
+        k_page = k_pages[page_idx].unsqueeze(1).transpose(-2, -1)
         return torch.matmul(q, k_page)
 
     scores = page_attn(q, k_pages, page_idx)
 
     expected = torch.matmul(
         q.cpu(),
-        k_pages.cpu()[2].unsqueeze(0).transpose(-2, -1),
+        k_pages.cpu()[2].unsqueeze(1).transpose(-2, -1),
     )
     torch.testing.assert_close(scores.cpu(), expected, atol=1e-3, rtol=1e-3)
 
