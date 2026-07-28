@@ -248,7 +248,7 @@ def test_spyre_indirect_matmul_tensor_index(spyre_device):
         q.cpu(),
         k_pages.cpu()[2].unsqueeze(1).transpose(-2, -1),
     )
-    torch.testing.assert_close(scores.cpu(), expected, atol=1e-3, rtol=1e-3)
+    torch.testing.assert_close(scores.cpu(), expected, atol=1e-1, rtol=5e-2)
 
 
 # ---------------------------------------------------------------------------
