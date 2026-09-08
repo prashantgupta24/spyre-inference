@@ -299,7 +299,11 @@ class _SpyreModelWrapper:
         object.__setattr__(self, "_keep_outputs_on_device", keep_outputs_on_device)
 
     def __call__(self, *args, **kwargs):
-        # Convert integer tensor inputs to Spyre int64
+        # Convert integer tensor inputs to Spyre int64. tree_map recurses into
+        # nested args/kwargs (lists, dicts, tuples), so every int tensor leaf is
+        # moved to Spyre. This assumes nested int tensors are consumed on Spyre;
+        # a CPU-side int op (e.g. RoBERTa position_ids + padding_idx) must run
+        # before the wrapper sees the tensor or it will be relocated prematurely.
         def _convert_int(t):
             if (
                 t is not None
