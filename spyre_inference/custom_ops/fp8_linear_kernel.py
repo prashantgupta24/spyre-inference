@@ -31,7 +31,6 @@ from typing import cast
 
 import torch
 from torch.nn.parameter import Parameter
-from torch_spyre._inductor.constants import FP8_E4M3FN_MAX
 from vllm.logger import init_logger
 from vllm.model_executor.kernels.linear import register_linear_kernel
 from vllm.model_executor.kernels.linear.scaled_mm.ScaledMMLinearKernel import (
@@ -44,6 +43,7 @@ from vllm.platforms import PlatformEnum
 logger = init_logger(__name__)
 
 _REGISTERED = False
+FP8_E4M3FN_MAX = float(torch.finfo(torch.float8_e4m3fn).max)
 
 _WIDE = 4096
 _WIDE_N = (4096, 1024, 128)
