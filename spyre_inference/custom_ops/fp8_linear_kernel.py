@@ -14,9 +14,9 @@
 
 """Spyre FP8 linear: keep checkpoint FP8 weights, run compiled ``aten._scaled_mm``.
 
-Forward (same graph as torch-spyre ``test_fp8_scaled_mm_cpu``):
+Forward:
 
-    scale_a = amax(x) / 448                         # eager, outside compile
+    scale_a = quantscalepertokenfp8(x)              # inside compile for per-token
     y = _scaled_mm(qfp8ch(x), qfp8wt(W), scale_a, scale_b)   # FP16 out
 
 Granite 4096-wide SuperDSC only accepts M∈{1,4} and N∈{4096,1024,128}, so we
@@ -31,6 +31,7 @@ from typing import cast
 
 import torch
 from torch.nn.parameter import Parameter
+from torch_spyre._inductor.constants import FP8_E4M3FN_MAX
 from vllm.logger import init_logger
 from vllm.model_executor.kernels.linear import register_linear_kernel
 from vllm.model_executor.kernels.linear.scaled_mm.ScaledMMLinearKernel import (
@@ -43,7 +44,6 @@ from vllm.platforms import PlatformEnum
 logger = init_logger(__name__)
 
 _REGISTERED = False
-FP8_E4M3FN_MAX = float(torch.finfo(torch.float8_e4m3fn).max)
 
 _WIDE = 4096
 _WIDE_N = (4096, 1024, 128)
@@ -80,23 +80,20 @@ def _join(parts: list[torch.Tensor], dim: int) -> torch.Tensor:
     return (parts[0] if len(parts) == 1 else torch.cat(parts, dim=dim)).clone()
 
 
-def _activation_scale(x: torch.Tensor, per_token: bool) -> torch.Tensor:
-    if per_token:
-        amax = x.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
-        return (amax / FP8_E4M3FN_MAX).to(dtype=torch.float16)
-    amax = x.abs().amax().clamp(min=1e-12)
-    return (amax / FP8_E4M3FN_MAX).to(dtype=torch.float16).reshape(1)
-
-
 @torch.compile(backend="inductor", dynamic=False)
 def _compiled_fp8_scaled_mm(
     x: torch.Tensor,
-    scale_a: torch.Tensor,
     weight: torch.Tensor,
     weight_scale: torch.Tensor,
     bias: torch.Tensor | None,
+    per_token: bool,
 ) -> torch.Tensor:
     # qfp8wt layout is assigned in this graph; do not pre-quantize weights.
+    if per_token:
+        scale_a = torch.ops.spyre.quantscalepertokenfp8(x)
+    else:
+        amax = x.abs().amax()
+        scale_a = (amax / FP8_E4M3FN_MAX).to(dtype=torch.float16).reshape(1)
     x_fp8 = torch.ops.spyre.quantize_fp8_with_scale(
         x,  # ty: ignore[invalid-argument-type]
         scale_a,  # ty: ignore[invalid-argument-type]
@@ -122,7 +119,7 @@ def _fp8_mm(
     bias: torch.Tensor | None,
     per_token: bool,
 ) -> torch.Tensor:
-    return _compiled_fp8_scaled_mm(x, _activation_scale(x, per_token), weight, weight_scale, bias)
+    return _compiled_fp8_scaled_mm(x, weight, weight_scale, bias, per_token)
 
 
 def _fp16_weight_for_qfp8wt(
