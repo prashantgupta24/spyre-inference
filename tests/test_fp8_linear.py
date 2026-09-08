@@ -204,6 +204,11 @@ class TestSpyreFp8LinearKernel:
         assert actual.device.type == "spyre", actual.device
         return actual
 
+    def _assert_close_to_fp16_reference(self, actual, x, weight_kn):
+        """Compare Spyre FP8 output to a plain FP16 matmul reference."""
+        expected = torch.matmul(x.cpu().to(torch.float16), weight_kn.T.cpu())
+        torch.testing.assert_close(actual.cpu(), expected, rtol=0.05, atol=0.05)
+
     @pytest.mark.parametrize("num_tokens", [1, 4, 128])
     def test_scaled_mm_apply(self, num_tokens):
         """apply_weights runs aten._scaled_mm on Spyre."""
@@ -227,6 +232,7 @@ class TestSpyreFp8LinearKernel:
         actual = self._run_spyre_apply(kernel, layer, x)
         assert actual.dtype == torch.float16
         assert actual.shape == (num_tokens, out_features)
+        self._assert_close_to_fp16_reference(actual, x, weight_kn)
 
     @pytest.mark.parametrize("num_tokens", [1, 4, 128])
     def test_scaled_mm_apply_per_channel(self, num_tokens):
@@ -251,6 +257,7 @@ class TestSpyreFp8LinearKernel:
         actual = self._run_spyre_apply(kernel, layer, x)
         assert actual.dtype == torch.float16
         assert actual.shape == (num_tokens, out_features)
+        self._assert_close_to_fp16_reference(actual, x, weight_kn)
 
     def test_qkv_constructs_with_fp8_config(self, tp_group):
         """Real QKVParallelLinear + Fp8Config constructs (kernel selection works)."""
