@@ -112,16 +112,6 @@ def _compiled_fp8_scaled_mm(
     )
 
 
-def _fp8_mm(
-    x: torch.Tensor,
-    weight: torch.Tensor,
-    weight_scale: torch.Tensor,
-    bias: torch.Tensor | None,
-    per_token: bool,
-) -> torch.Tensor:
-    return _compiled_fp8_scaled_mm(x, weight, weight_scale, bias, per_token)
-
-
 def _fp16_weight_for_qfp8wt(
     weight: torch.Tensor, weight_scale: torch.Tensor, device: torch.device
 ) -> torch.Tensor:
@@ -255,7 +245,7 @@ class SpyreFp8LinearKernel(FP8ScaledMMLinearKernel):
             for wj, sj in splits:
                 ns = wj.shape[1]
                 bj = None if bias is None else bias[col : col + ns].clone()
-                col_outs.append(_fp8_mm(xi, wj, sj, bj, self._per_token_act))
+                col_outs.append(_compiled_fp8_scaled_mm(xi, wj, sj, bj, self._per_token_act))
                 col += ns
             row_outs.append(_join(col_outs, dim=-1))
         out = _join(row_outs, dim=0)[:orig_m]
@@ -278,7 +268,7 @@ class SpyreFp8LinearKernel(FP8ScaledMMLinearKernel):
         # Upstream Torch only overrides this hook because parent apply_weights
         # quantizes then calls it with already-FP8 A/B. We replace apply_weights
         # (tiling + in-graph qfp8ch/qfp8wt), so this is never entered. Do not
-        # wrap _fp8_mm here: that helper expects FP16 x/W, not pre-quantized A/B.
+        # wrap _compiled_fp8_scaled_mm here: it expects FP16 x/W, not pre-quantized A/B.
         raise RuntimeError(
             "SpyreFp8LinearKernel runs only through apply_weights "
             "(tiled qfp8ch/qfp8wt graph). apply_scaled_mm is unused."
