@@ -176,6 +176,8 @@ class TestSpyreFp8LinearKernel:
         Forward quantizes with ``quantize_weight_fp8_with_scale`` (``qfp8wt``)
         inside the same compiled graph as ``_scaled_mm`` — torch-spyre's
         ``test_fp8_scaled_mm_cpu``. CPU ``float8.to("spyre")`` is the wrong layout.
+
+        Returns the prepared layer and the CPU weight scale used for a reference.
         """
         if per_channel:
             _weight_fp8, weight_scale = _quantize_weight_fp8_per_channel(weight_kn)
@@ -188,11 +190,12 @@ class TestSpyreFp8LinearKernel:
         layer.weight = torch.nn.Parameter(_weight_fp8, requires_grad=False)
         layer.weight_scale = torch.nn.Parameter(weight_scale, requires_grad=False)
         kernel.process_weights_after_loading(layer)
+        scale_for_ref = layer.weight_scale.data.detach().cpu()
         layer.weight = torch.nn.Parameter(weight_kn.contiguous().to("spyre"), requires_grad=False)
         layer.weight_scale = torch.nn.Parameter(
             layer.weight_scale.data.to("spyre"), requires_grad=False
         )
-        return layer
+        return layer, scale_for_ref
 
     def _run_spyre_apply(self, kernel, layer, x):
         """Call apply_weights on Spyre (one inductor graph: qfp8ch + qfp8wt + mm)."""
@@ -204,9 +207,42 @@ class TestSpyreFp8LinearKernel:
         assert actual.device.type == "spyre", actual.device
         return actual
 
-    def _assert_close_to_fp16_reference(self, actual, x, weight_kn):
-        """Compare Spyre FP8 output to a plain FP16 matmul reference."""
-        expected = torch.matmul(x.cpu().to(torch.float16), weight_kn.T.cpu())
+    def _activation_scale(self, x: torch.Tensor, per_token: bool) -> torch.Tensor:
+        """Per-token or per-tensor FP8 scale used by the reference."""
+        if per_token:
+            amax = x.abs().amax(dim=-1, keepdim=True).clamp(min=1e-12)
+        else:
+            amax = x.abs().amax().clamp(min=1e-12)
+        return (amax / FP8_E4M3FN_MAX).to(torch.float16)
+
+    def _dequantize_fp8_reference(
+        self,
+        x: torch.Tensor,
+        weight_kn: torch.Tensor,
+        weight_scale: torch.Tensor,
+        per_token: bool,
+    ) -> torch.Tensor:
+        """Expected output from dequantizing x and weight through FP8."""
+        scale_a = self._activation_scale(x, per_token)
+        x_q = (x / scale_a).clamp(FP8_E4M3FN_MIN, FP8_E4M3FN_MAX)
+        x_deq = x_q * scale_a
+
+        scale_b = weight_scale.to(torch.float16)
+        if scale_b.numel() != 1:
+            scale_b = scale_b.reshape(1, -1)
+        w_q = (weight_kn / scale_b).clamp(FP8_E4M3FN_MIN, FP8_E4M3FN_MAX)
+        w_deq = w_q * scale_b
+
+        return torch.matmul(x_deq, w_deq.T)
+
+    def _assert_close_to_fp16_reference(self, actual, x, weight_kn, weight_scale, per_token):
+        """Compare Spyre FP8 output to a dequantized FP8 matmul reference."""
+        expected = self._dequantize_fp8_reference(
+            x.cpu().to(torch.float16),
+            weight_kn.cpu(),
+            weight_scale.cpu(),
+            per_token,
+        )
         torch.testing.assert_close(actual.cpu(), expected, rtol=0.05, atol=0.05)
 
     @pytest.mark.parametrize("num_tokens", [1, 4, 128])
@@ -226,13 +262,13 @@ class TestSpyreFp8LinearKernel:
         torch.manual_seed(42)
         in_features, out_features = 128, 128
         weight_kn = torch.randn(in_features, out_features, dtype=torch.float16) * 0.05
-        layer = self._prepare_spyre_apply_layer(kernel, weight_kn, per_channel=False)
+        layer, weight_scale = self._prepare_spyre_apply_layer(kernel, weight_kn, per_channel=False)
 
         x = torch.randn(num_tokens, in_features, dtype=torch.float16, device="spyre")
         actual = self._run_spyre_apply(kernel, layer, x)
         assert actual.dtype == torch.float16
         assert actual.shape == (num_tokens, out_features)
-        self._assert_close_to_fp16_reference(actual, x, weight_kn)
+        self._assert_close_to_fp16_reference(actual, x, weight_kn, weight_scale, per_token=False)
 
     @pytest.mark.parametrize("num_tokens", [1, 4, 128])
     def test_scaled_mm_apply_per_channel(self, num_tokens):
@@ -251,13 +287,13 @@ class TestSpyreFp8LinearKernel:
         torch.manual_seed(42)
         in_features, out_features = 128, 128
         weight_kn = torch.randn(in_features, out_features, dtype=torch.float16) * 0.05
-        layer = self._prepare_spyre_apply_layer(kernel, weight_kn, per_channel=True)
+        layer, weight_scale = self._prepare_spyre_apply_layer(kernel, weight_kn, per_channel=True)
 
         x = torch.randn(num_tokens, in_features, dtype=torch.float16, device="spyre")
         actual = self._run_spyre_apply(kernel, layer, x)
         assert actual.dtype == torch.float16
         assert actual.shape == (num_tokens, out_features)
-        self._assert_close_to_fp16_reference(actual, x, weight_kn)
+        self._assert_close_to_fp16_reference(actual, x, weight_kn, weight_scale, per_token=True)
 
     def test_qkv_constructs_with_fp8_config(self, tp_group):
         """Real QKVParallelLinear + Fp8Config constructs (kernel selection works)."""
