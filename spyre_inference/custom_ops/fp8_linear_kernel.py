@@ -93,32 +93,11 @@ def _per_tensor_activation_scale(x: torch.Tensor) -> torch.Tensor:
 
 
 @torch.compile(backend="inductor", dynamic=False)
-def _compiled_fp8_scaled_mm_per_token(
-    x: torch.Tensor,
-    weight: torch.Tensor,
-    weight_scale: torch.Tensor,
-    bias: torch.Tensor | None,
-) -> torch.Tensor:
+def _compiled_fp8_scale(x: torch.Tensor) -> torch.Tensor:
     # quantscalepertokenfp8 computes amax, scale, and clip inside the graph.
-    scale_a = torch.ops.spyre.quantscalepertokenfp8(
+    return torch.ops.spyre.quantscalepertokenfp8(
         x,  # ty: ignore[invalid-argument-type]
         FP8_E4M3FN_MAX,  # ty: ignore[invalid-argument-type]
-    )
-    x_fp8 = torch.ops.spyre.quantize_fp8_with_scale(
-        x,  # ty: ignore[invalid-argument-type]
-        scale_a,  # ty: ignore[invalid-argument-type]
-    )
-    w_fp8 = torch.ops.spyre.quantize_weight_fp8_with_scale(
-        weight,  # ty: ignore[invalid-argument-type]
-        weight_scale,  # ty: ignore[invalid-argument-type]
-    )
-    return torch.ops.aten._scaled_mm(
-        x_fp8,  # ty: ignore[invalid-argument-type]
-        w_fp8,  # ty: ignore[invalid-argument-type]
-        scale_a=scale_a,  # ty: ignore[invalid-argument-type]
-        scale_b=weight_scale,  # ty: ignore[invalid-argument-type]
-        bias=bias,  # ty: ignore[invalid-argument-type]
-        out_dtype=torch.float16,  # ty: ignore[invalid-argument-type]
     )
 
 
@@ -157,7 +136,8 @@ def _fp8_mm(
     per_token: bool,
 ) -> torch.Tensor:
     if per_token:
-        return _compiled_fp8_scaled_mm_per_token(x, weight, weight_scale, bias)
+        scale_a = _compiled_fp8_scale(x)
+        return _compiled_fp8_scaled_mm(x, scale_a, weight, weight_scale, bias)
     return _compiled_fp8_scaled_mm(x, _per_tensor_activation_scale(x), weight, weight_scale, bias)
 
 
