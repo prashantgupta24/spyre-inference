@@ -152,7 +152,17 @@ runs:
         HF_HUB_OFFLINE: '0'
       run: uv run .github/cache_config/manage_cache.py --public
 
-    # cache_dir() defaults to one path shared by every pod on this PVC-mounted runner pool; a fixed path let one job's compile reuse (stale XPASS/wrong-output) or race another concurrent job's, so scope it per matrix job instead of clearing the shared one. The same path roots the persistent Spyre kernel cache, so enable it here for intra-job reuse.
+    # cache_dir() defaults to one path shared by every pod on this PVC-mounted runner pool; a fixed path let one job's compile reuse (stale XPASS/wrong-output) or race another concurrent job's, so scope it per matrix job instead of clearing the shared one. The persistent Spyre kernel cache lives under the same path; enable it and persist it across runs with a tightly-keyed actions/cache entry so repeated CI runs can reuse compiled kernels.
+    - name: Restore Spyre kernel compile cache
+      id: restore-spyre-kernel-cache
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/inductor-cache-${{ inputs.job_slot }}-${{ github.run_id }}
+        key: spyre-kernel-cache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.job_slot }}-${{ hashFiles('pyproject.toml', 'uv.lock', 'spyre-rpms.lock') }}-${{ inputs.runner_labels || 'default' }}
+        restore-keys: |
+          spyre-kernel-cache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.job_slot }}-${{ hashFiles('pyproject.toml', 'uv.lock', 'spyre-rpms.lock') }}-
+          spyre-kernel-cache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.job_slot }}-
+
     - name: Use a job-scoped compile cache and enable Spyre kernel caching
       shell: bash
       run: |
@@ -261,3 +271,10 @@ runs:
         # dorny/test-reporter@v1 has no python-specific reporter; java-junit parses the generic JUnit-XML schema pytest's --junit-xml emits.
         reporter: java-junit
         fail-on-error: false
+
+    - name: Save Spyre kernel compile cache
+      if: always()
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/inductor-cache-${{ inputs.job_slot }}-${{ github.run_id }}
+        key: ${{ steps.restore-spyre-kernel-cache.outputs.cache-primary-key }}
