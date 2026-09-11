@@ -14,7 +14,6 @@
 
 """Paged KV-cache attention backend for Spyre using a dense page tensor and online softmax."""
 
-import bisect
 import contextlib
 import functools
 import time
@@ -44,6 +43,7 @@ from spyre_inference import envs
 from spyre_inference.custom_ops.utils import convert
 from spyre_inference.v1.attention import attn_layer
 from spyre_inference.v1.attention.spyre_attn_bucketer import (
+    _MIN_BATCHED_SEQS,
     SpyreAttnBucket,
     SpyreAttnBucketer,
 )
@@ -92,38 +92,6 @@ def _record_block(name: str):
 INT32_ELEMS_PER_STICK = 32
 
 _SPYRE_CORE_COUNT = 32
-
-
-# Batches below this fall back to the per-seq loop: the batched matmul's
-# padded-row overhead exceeds the per-seq cost at small N.
-_MIN_BATCHED_SEQS = 4
-
-
-def _powers_of_two_up_to(n: int, start: int = 1) -> tuple[int, ...]:
-    """Powers of 2 in [start, n], plus n itself if it is not already a power of 2.
-
-    ``start`` is rounded up to a power of 2 first, keeping a pure doubling
-    sequence. A ``start`` above ``n`` yields just ``(n,)``.
-    """
-    if n < 1:
-        return ()
-    v = 1
-    while v < start:
-        v *= 2
-    result = []
-    while v < n:
-        result.append(v)
-        v *= 2
-    result.append(n)
-    return tuple(result)
-
-
-def _find_bucket(n: int, buckets: tuple[int, ...]) -> int | None:
-    """Smallest bucket >= n, or None when n exceeds the top bucket."""
-    idx = bisect.bisect_left(buckets, n)
-    if idx < len(buckets):
-        return buckets[idx]
-    return None
 
 
 class SpyrePagedKVCache(NamedTuple):
@@ -682,15 +650,6 @@ class SpyreAttentionMetadataBuilder(AttentionMetadataBuilder[SpyreAttentionMetad
             static_ctx[name] for name in layer_names if name in static_ctx
         )
 
-        # Buckets for the batched decode fast path. One compiled kernel
-        # per bucket. TODO: expose as engine args if configurability is needed.
-        max_num_seqs = vllm_config.scheduler_config.max_num_seqs
-        max_num_blocks_per_seq = (
-            model_config.max_model_len + self.block_size - 1
-        ) // self.block_size
-        self._num_seqs_buckets: tuple[int, ...] = _powers_of_two_up_to(max_num_seqs)
-        self._num_blocks_buckets: tuple[int, ...] = _powers_of_two_up_to(max_num_blocks_per_seq)
-
         # Owned here, not by the recorder, so a bucket build() can emit is
         # always a bucket that was compiled: the warmup recorder reads this
         # same instance back (spyre_model_runner._record_attention_graphs)
@@ -726,7 +685,7 @@ class SpyreAttentionMetadataBuilder(AttentionMetadataBuilder[SpyreAttentionMetad
             # A fully-masked padded tile would divide by a zero softmax
             # denominator, so zero real blocks must stay zero.
             return 0
-        padded = SpyreAttnBucketer._round_up(num_blocks, self._attn_bucketer.num_blocks_buckets)
+        padded = self._attn_bucketer.find_blocks_bucket(num_blocks)
         # Unreachable: the top bucket covers ceil(max_model_len / block_size),
         # and num_blocks here is bounded by the same max_model_len.
         assert padded is not None, (
@@ -1089,9 +1048,11 @@ class SpyreAttentionMetadataBuilder(AttentionMetadataBuilder[SpyreAttentionMetad
         if num_decode_seqs >= _MIN_BATCHED_SEQS:
             # Real counts for the decode prefix only — same reasoning as before.
             blocks_per_seq = real_num_blocks if active_block_indices is None else num_active
+
             decode_blocks = blocks_per_seq[:num_decode_seqs]
-            b_seqs = _find_bucket(num_decode_seqs, self._num_seqs_buckets)
-            b_blocks = _find_bucket(max(decode_blocks), self._num_blocks_buckets)
+            b_seqs = self._attn_bucketer.find_sequence_bucket(num_decode_seqs)
+            b_blocks = self._attn_bucketer.find_blocks_bucket(max(decode_blocks))
+
             if b_seqs is not None and b_blocks is not None:
                 padded_num_seqs = b_seqs
                 # Entries target the cores: fewer under-fills them, more than one
