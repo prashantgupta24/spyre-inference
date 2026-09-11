@@ -80,9 +80,6 @@ def _raise_dynamo_recompile_limits() -> None:
     # The (op × shape) set is finite and every recompile is correct, so raise
     # both limits far out of reach. Set at import to cover every process (engine
     # + TP workers); torch._dynamo.config is process-local (torch-spyre #444).
-    #
-    # The persistent Spyre kernel cache (SPYRE_KERNEL_CACHE=1) further reduces
-    # recompile pressure by reusing compiled kernels across runs.
     import torch._dynamo
 
     torch._dynamo.config.cache_size_limit = 100000
