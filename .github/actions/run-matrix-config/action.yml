@@ -173,6 +173,26 @@ runs:
         echo "TORCHINDUCTOR_CACHE_DIR=${RUNNER_TEMP}/inductor-cache-${{ inputs.job_slot }}" >> "$GITHUB_ENV"
         echo "SPYRE_KERNEL_CACHE=1" >> "$GITHUB_ENV"
 
+    - name: Debug RPM component versions visible to Spyre runtime
+      shell: bash
+      run: |
+        echo "::group::spyre-rpms.lock contents"
+        cat spyre-rpms.lock
+        echo "::endgroup::"
+        echo "::group::Runtime component files"
+        for f in /opt/ibm/spyre/components.txt /opt/ibm/spyre/components.lock; do
+          if [ -f "$f" ]; then
+            echo "=== $f ==="
+            cat "$f"
+          else
+            echo "=== $f not found ==="
+          fi
+        done
+        echo "::endgroup::"
+        echo "::group::LD_LIBRARY_PATH"
+        echo "$LD_LIBRARY_PATH"
+        echo "::endgroup::"
+
     # All shard jobs of a suite must weight the partition from the SAME durations
     # file or they'd compute different partitions and drop/double-run tests, so
     # the run id is pinned once (resolve_durations job) and every leg downloads
