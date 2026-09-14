@@ -339,4 +339,7 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ runner.temp }}/inductor-cache-${{ inputs.job_slot }}
-        key: ${{ steps.restore-spyre-kernel-cache.outputs.cache-primary-key }}
+        # Hash the actual RPM versions (materialized above) in addition to the
+        # lockfiles so the saved key reflects the libraries the kernels were
+        # compiled against, not just the wildcarded lock entries.
+        key: spyre-kernel-cache-${{ runner.os }}-${{ runner.arch }}-${{ inputs.job_slot }}-${{ hashFiles('pyproject.toml', 'uv.lock', 'spyre-rpms.lock', format('{0}/runner-labels.txt', runner.temp), format('{0}/spyre-rpm-versions.txt', runner.temp)) }}
