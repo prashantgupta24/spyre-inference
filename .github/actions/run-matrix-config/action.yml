@@ -173,6 +173,24 @@ runs:
         echo "TORCHINDUCTOR_CACHE_DIR=${RUNNER_TEMP}/inductor-cache-${{ inputs.job_slot }}" >> "$GITHUB_ENV"
         echo "SPYRE_KERNEL_CACHE=1" >> "$GITHUB_ENV"
 
+    # torch-spyre keys its kernel cache on LIB_VERSION_FILE, which the RPM
+    # install/override actions synthesize from the extracted RPM filenames.
+    # Materialize that file into the runner temp so the cache save key can hash
+    # the actual installed versions rather than the lockfile wildcards.
+    - name: Materialize RPM component versions for cache key
+      shell: bash
+      run: |
+        src="${LIB_VERSION_FILE:-/opt/ibm/spyre/components.txt}"
+        dest="${RUNNER_TEMP}/spyre-rpm-versions.txt"
+        if [ -f "$src" ]; then
+          cp "$src" "$dest"
+          echo "Materialized RPM versions from $src"
+          cat "$dest"
+        else
+          echo "::warning::$src not found; kernel cache save key will not include RPM versions"
+          touch "$dest"
+        fi
+
     - name: Debug RPM component versions visible to Spyre runtime
       shell: bash
       run: |
