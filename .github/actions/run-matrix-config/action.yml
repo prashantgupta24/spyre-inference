@@ -157,6 +157,26 @@ runs:
       shell: bash
       run: printf '%s\n' ${{ inputs.runner_labels }} > "${RUNNER_TEMP}/runner-labels.txt"
 
+    # torch-spyre's kernel cache keys on LIB_VERSION_FILE. The RPM install and
+    # override actions normally export it; if this is a prebaked-image run or an
+    # older action, fall back to the image's components.txt so the cache key is
+    # consistent with the runtime library versions.
+    - name: Ensure LIB_VERSION_FILE is set
+      shell: bash
+      run: |
+        if [[ -n "${LIB_VERSION_FILE:-}" && -f "$LIB_VERSION_FILE" ]]; then
+          echo "LIB_VERSION_FILE already set to $LIB_VERSION_FILE"
+          exit 0
+        fi
+        fallback="/opt/ibm/spyre/components.txt"
+        if [[ -f "$fallback" ]]; then
+          echo "LIB_VERSION_FILE=$fallback" >> "$GITHUB_ENV"
+          echo "Set LIB_VERSION_FILE=$fallback"
+        else
+          echo "::error::LIB_VERSION_FILE is unset and $fallback does not exist; cannot key Spyre kernel cache on runtime library versions"
+          exit 1
+        fi
+
     - name: Restore Spyre kernel compile cache
       id: restore-spyre-kernel-cache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
