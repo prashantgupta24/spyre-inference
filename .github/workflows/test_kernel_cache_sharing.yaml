@@ -31,6 +31,10 @@ env:
   STORAGE_1_DIR: /storage-1/spyre-inference
   HF_HOME: /storage-1/spyre-inference/.cache/huggingface
   HF_HUB_OFFLINE: '1'
+  # For workflow_dispatch, use the provided input; for pull_request (and any
+  # other trigger), fall back to the same default so the shared cache path is
+  # always well-defined.
+  CACHE_BASE_DIR: ${{ inputs.cache_base_dir || '/storage-1/spyre-inference/.cache/torchinductor-shared-test' }}
 
 jobs:
   compile-subset-a:
@@ -77,7 +81,7 @@ jobs:
       - name: Run subset A with shared cache
         shell: bash
         env:
-          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          TORCHINDUCTOR_CACHE_DIR: ${{ env.CACHE_BASE_DIR }}-${{ github.run_id }}
           SPYRE_KERNEL_CACHE: '1'
         run: |
           mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
@@ -136,7 +140,7 @@ jobs:
       - name: Run subset B with shared cache
         shell: bash
         env:
-          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          TORCHINDUCTOR_CACHE_DIR: ${{ env.CACHE_BASE_DIR }}-${{ github.run_id }}
           SPYRE_KERNEL_CACHE: '1'
         run: |
           mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
@@ -196,7 +200,7 @@ jobs:
       - name: Run combined subset against shared cache
         shell: bash
         env:
-          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          TORCHINDUCTOR_CACHE_DIR: ${{ env.CACHE_BASE_DIR }}-${{ github.run_id }}
           SPYRE_KERNEL_CACHE: '1'
         run: |
           echo "::group::Shared cache before combined run"
@@ -216,7 +220,7 @@ jobs:
       - name: Report cache contents
         shell: bash
         env:
-          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          TORCHINDUCTOR_CACHE_DIR: ${{ env.CACHE_BASE_DIR }}-${{ github.run_id }}
         run: |
           echo "::group::Cache file inventory"
           find "$TORCHINDUCTOR_CACHE_DIR" -type f | sort | head -200
@@ -226,7 +230,7 @@ jobs:
         if: ${{ always() && inputs.cleanup }}
         shell: bash
         env:
-          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          TORCHINDUCTOR_CACHE_DIR: ${{ env.CACHE_BASE_DIR }}-${{ github.run_id }}
         run: |
           echo "Removing $TORCHINDUCTOR_CACHE_DIR"
           rm -rf "$TORCHINDUCTOR_CACHE_DIR"
