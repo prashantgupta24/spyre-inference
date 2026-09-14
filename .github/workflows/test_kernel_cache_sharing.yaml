@@ -21,6 +21,10 @@ on:
         required: false
         type: boolean
         default: true
+  pull_request:
+    # Run when this diagnostic workflow itself changes so the PR can validate it.
+    paths:
+      - .github/workflows/test_kernel_cache_sharing.yaml
 
 env:
   CI: ''
