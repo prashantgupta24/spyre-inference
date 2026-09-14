@@ -1,0 +1,228 @@
+name: Test Spyre kernel cache sharing
+
+# Diagnostic workflow to validate whether multiple concurrent CI jobs can safely
+# share a single TORCHINDUCTOR_CACHE_DIR on the cluster's /storage-1 PVC and
+# whether kernels compiled by one job are reused by later jobs.
+#
+# This is Phase 1 of the shared-cache investigation raised in #812. It is not
+# intended to run on every PR; trigger it manually when evaluating cache-sharing
+# options.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cache_base_dir:
+        description: Base directory for the shared cache experiment
+        required: false
+        type: string
+        default: /storage-1/spyre-inference/.cache/torchinductor-shared-test
+      cleanup:
+        description: Remove the shared cache directory after the run
+        required: false
+        type: boolean
+        default: true
+
+env:
+  CI: ''
+  STORAGE_1_DIR: /storage-1/spyre-inference
+  HF_HOME: /storage-1/spyre-inference/.cache/huggingface
+  HF_HUB_OFFLINE: '1'
+
+jobs:
+  compile-subset-a:
+    name: Compile subset A into shared cache
+    runs-on: [x86_64, spyre_pf_x1, linux, image_torch_spyre]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Spyre RPMs
+        uses: ./.github/actions/spyre-rpm-install
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            spyre-rpms.lock
+          cache-local-path: ${{ runner.temp }}/setup-uv-cache
+          prune-cache: false
+          save-cache: false
+
+      - name: Build spyre-inference
+        shell: bash
+        run: |
+          source "$HOME/.bashrc"
+          source /etc/profile.d/ibm-aiu-setup.sh
+          uv sync --frozen --verbose --group dev
+          uv pip show torch
+
+      - name: Activate venv
+        shell: bash
+        run: |
+          rm -rf /home/senuser/.venv
+          echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/.venv" >> "$GITHUB_ENV"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure public HF models cached
+        shell: bash
+        env:
+          HF_HUB_OFFLINE: '0'
+        run: uv run .github/cache_config/manage_cache.py --public
+
+      - name: Run subset A with shared cache
+        shell: bash
+        env:
+          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          SPYRE_KERNEL_CACHE: '1'
+        run: |
+          mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
+          echo "::group::Shared cache before A"
+          du -sh "$TORCHINDUCTOR_CACHE_DIR" || true
+          echo "::endgroup::"
+          # Attention tests compile a broad set of decoder attention kernels.
+          timeout --signal=TERM --kill-after=1m 90m \
+            uv run pytest tests/attention/test_spyre_attn.py -m "not upstream" --timeout=1800 -v
+          echo "::group::Shared cache after A"
+          du -sh "$TORCHINDUCTOR_CACHE_DIR" || true
+          find "$TORCHINDUCTOR_CACHE_DIR" -type f | wc -l
+          echo "::endgroup::"
+
+  compile-subset-b:
+    name: Compile subset B into shared cache
+    runs-on: [x86_64, spyre_pf_x1, linux, image_torch_spyre]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Spyre RPMs
+        uses: ./.github/actions/spyre-rpm-install
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            spyre-rpms.lock
+          cache-local-path: ${{ runner.temp }}/setup-uv-cache
+          prune-cache: false
+          save-cache: false
+
+      - name: Build spyre-inference
+        shell: bash
+        run: |
+          source "$HOME/.bashrc"
+          source /etc/profile.d/ibm-aiu-setup.sh
+          uv sync --frozen --verbose --group dev
+          uv pip show torch
+
+      - name: Activate venv
+        shell: bash
+        run: |
+          rm -rf /home/senuser/.venv
+          echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/.venv" >> "$GITHUB_ENV"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure public HF models cached
+        shell: bash
+        env:
+          HF_HUB_OFFLINE: '0'
+        run: uv run .github/cache_config/manage_cache.py --public
+
+      - name: Run subset B with shared cache
+        shell: bash
+        env:
+          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          SPYRE_KERNEL_CACHE: '1'
+        run: |
+          mkdir -p "$TORCHINDUCTOR_CACHE_DIR"
+          echo "::group::Shared cache before B"
+          du -sh "$TORCHINDUCTOR_CACHE_DIR" || true
+          echo "::endgroup::"
+          # Encoder attention tests compile a different set of kernels.
+          timeout --signal=TERM --kill-after=1m 90m \
+            uv run pytest tests/attention/test_spyre_encoder_attn.py -m "not upstream" --timeout=1800 -v
+          echo "::group::Shared cache after B"
+          du -sh "$TORCHINDUCTOR_CACHE_DIR" || true
+          find "$TORCHINDUCTOR_CACHE_DIR" -type f | wc -l
+          echo "::endgroup::"
+
+  verify-shared-cache:
+    name: Verify combined subset reuses shared cache
+    needs: [compile-subset-a, compile-subset-b]
+    runs-on: [x86_64, spyre_pf_x1, linux, image_torch_spyre]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Spyre RPMs
+        uses: ./.github/actions/spyre-rpm-install
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            spyre-rpms.lock
+          cache-local-path: ${{ runner.temp }}/setup-uv-cache
+          prune-cache: false
+          save-cache: false
+
+      - name: Build spyre-inference
+        shell: bash
+        run: |
+          source "$HOME/.bashrc"
+          source /etc/profile.d/ibm-aiu-setup.sh
+          uv sync --frozen --verbose --group dev
+          uv pip show torch
+
+      - name: Activate venv
+        shell: bash
+        run: |
+          rm -rf /home/senuser/.venv
+          echo "VIRTUAL_ENV=${GITHUB_WORKSPACE}/.venv" >> "$GITHUB_ENV"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure public HF models cached
+        shell: bash
+        env:
+          HF_HUB_OFFLINE: '0'
+        run: uv run .github/cache_config/manage_cache.py --public
+
+      - name: Run combined subset against shared cache
+        shell: bash
+        env:
+          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+          SPYRE_KERNEL_CACHE: '1'
+        run: |
+          echo "::group::Shared cache before combined run"
+          du -sh "$TORCHINDUCTOR_CACHE_DIR" || true
+          find "$TORCHINDUCTOR_CACHE_DIR" -type f | wc -l
+          echo "::endgroup::"
+          # Run both subsets in one process. If the shared cache works, most
+          # kernels should already be present and this should be faster than
+          # the sum of A and B.
+          timeout --signal=TERM --kill-after=1m 90m \
+            uv run pytest tests/attention/test_spyre_attn.py tests/attention/test_spyre_encoder_attn.py -m "not upstream" --timeout=1800 -v
+          echo "::group::Shared cache after combined run"
+          du -sh "$TORCHINDUCTOR_CACHE_DIR" || true
+          find "$TORCHINDUCTOR_CACHE_DIR" -type f | wc -l
+          echo "::endgroup::"
+
+      - name: Report cache contents
+        shell: bash
+        env:
+          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+        run: |
+          echo "::group::Cache file inventory"
+          find "$TORCHINDUCTOR_CACHE_DIR" -type f | sort | head -200
+          echo "::endgroup::"
+
+      - name: Clean up shared cache directory
+        if: ${{ always() && inputs.cleanup }}
+        shell: bash
+        env:
+          TORCHINDUCTOR_CACHE_DIR: ${{ inputs.cache_base_dir }}-${{ github.run_id }}
+        run: |
+          echo "Removing $TORCHINDUCTOR_CACHE_DIR"
+          rm -rf "$TORCHINDUCTOR_CACHE_DIR"
