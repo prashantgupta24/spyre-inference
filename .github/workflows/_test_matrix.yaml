@@ -596,6 +596,7 @@ jobs:
             .github/workflows/_test_matrix.yaml
             .github/actions/override-spyre-rpms/action.yml
             .github/actions/spyre-rpm-install/action.yml
+            .github/actions/run-matrix-config/action.yml
             pyproject.toml
             uv.lock
             spyre-rpms.lock
@@ -898,21 +899,6 @@ jobs:
           name: test-durations
           path: test-durations.json
           retention-days: 30
-
-  # EXPERIMENT: Disabled deletion so the shared cache persists across runs on
-  # this branch. The next empty commit will then exercise cross-run cache hits.
-  cleanup-shared-cache:
-    name: Clean up shared kernel cache experiment directory
-    needs: test_result
-    if: false
-    runs-on: [x86_64, spyre_pf_x1, linux, image_torch_spyre]
-    steps:
-      - name: Remove shared cache directory
-        shell: bash
-        run: |
-          dir="/storage-1/spyre-inference/.cache/torchinductor-shared-experiment-882"
-          echo "Removing $dir"
-          rm -rf "$dir"
 
   # ---------------------------------------------------------------------------
   # Perf job: the vLLM benchmark suite, on the SAME make entrypoint as the
