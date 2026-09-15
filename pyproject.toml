@@ -130,7 +130,7 @@ vllm = [
 ]
 # EXPERIMENT: use a fork with file-locking + ready-sentinel fixes for shared
 # NFS kernel cache. Revert to upstream torch-spyre after validating.
-torch-spyre = { git = "https://github.com/prashantgupta24/torch-spyre", rev = "d36f31da4fc33ae4e238ca0c52643c3ee300a94f" }
+torch-spyre = { git = "https://github.com/prashantgupta24/torch-spyre", rev = "3189fd39cb002d9d1e4aa9d2e1d55f3f82413377" }
 torch = [
   # Power has no prebuilt wheels on the pytorch-cpu index; build from source at the
   # tag matching the runtime pin. Everything else keeps the fast CPU-wheel path.
