@@ -794,6 +794,50 @@ jobs:
           echo "All configs passed (directly or after pod-level retry)."
 
   # ---------------------------------------------------------------------------
+  # Report shared Spyre kernel cache size. Runs after the matrix so the cache
+  # has been populated/used by the test jobs. Informational only.
+  # ---------------------------------------------------------------------------
+  report_kernel_cache_size:
+    name: Report shared kernel cache size
+    needs: [test, test_retry]
+    if: always()
+    runs-on: ${{ fromJSON(format('["{0}","{1}"]', 'x86_64","spyre_pf_x1","linux', inputs.runner_label || 'image_torch_spyre')) }}
+    steps:
+      - name: Measure shared kernel cache
+        env:
+          SPYRE_SHARED_KERNEL_CACHE_DIR: /storage-1/spyre-inference/.cache/torchinductor-shared-experiment-882
+        run: |
+          if [ -d "${SPYRE_SHARED_KERNEL_CACHE_DIR}" ]; then
+            total_bytes=$(du -sb "${SPYRE_SHARED_KERNEL_CACHE_DIR}" | cut -f1)
+            total_human=$(du -sh "${SPYRE_SHARED_KERNEL_CACHE_DIR}" | cut -f1)
+            echo "Shared kernel cache total: ${total_human} (${total_bytes} bytes)"
+            echo "### Shared Spyre kernel cache size" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Total:** ${total_human} (${total_bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
+            echo "- **Path:** \`${SPYRE_SHARED_KERNEL_CACHE_DIR}\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "#### Per-cache-key size" >> "$GITHUB_STEP_SUMMARY"
+            for key_dir in "${SPYRE_SHARED_KERNEL_CACHE_DIR}"/*/; do
+              [ -d "${key_dir}" ] || continue
+              key=$(basename "${key_dir}")
+              key_human=$(du -sh "${key_dir}" | cut -f1)
+              echo "- \`${key}\`: ${key_human}" >> "$GITHUB_STEP_SUMMARY"
+            done
+            echo '{"bytes":' "${total_bytes}" '}' > "${RUNNER_TEMP}/kernel-cache-size.json"
+          else
+            echo "Shared kernel cache directory does not exist: ${SPYRE_SHARED_KERNEL_CACHE_DIR}"
+            echo "### Shared Spyre kernel cache size" >> "$GITHUB_STEP_SUMMARY"
+            echo "Cache directory does not exist." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload kernel-cache size artifact
+        if: ${{ hashFiles(format('{0}/kernel-cache-size.json', runner.temp)) != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: kernel-cache-size
+          path: ${{ runner.temp }}/kernel-cache-size.json
+          if-no-files-found: ignore
+          retention-days: 30
+
+  # ---------------------------------------------------------------------------
   # Coverage fan-in: combine every job's data into one report. Stock runner
   # (needs only the coverage tool + a checkout for .coveragerc and the sources).
   # always() so partial coverage still reports when suites fail; no-op when no
