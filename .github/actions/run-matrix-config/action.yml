@@ -200,9 +200,9 @@ runs:
       run: |
         if [ -n "${SPYRE_SHARED_KERNEL_CACHE_DIR:-}" ]; then
           echo "TORCHINDUCTOR_CACHE_DIR=${SPYRE_SHARED_KERNEL_CACHE_DIR}" >> "$GITHUB_ENV"
-          echo "SPYRE_KERNEL_CACHE=1" >> "$GITHUB_ENV"
-          echo "SPYRE_KERNEL_CACHE_SHARED=1" >> "$GITHUB_ENV"
-          echo "Using shared kernel cache dir: ${SPYRE_SHARED_KERNEL_CACHE_DIR}"
+          echo "SPYRE_KERNEL_CACHE=0" >> "$GITHUB_ENV"
+          echo "SPYRE_KERNEL_CACHE_SHARED=0" >> "$GITHUB_ENV"
+          echo "Using shared kernel cache dir (disabled for measurement): ${SPYRE_SHARED_KERNEL_CACHE_DIR}"
         else
           echo "TORCHINDUCTOR_CACHE_DIR=${RUNNER_TEMP}/inductor-cache-${{ inputs.job_slot }}-${{ github.run_id }}" >> "$GITHUB_ENV"
         fi
