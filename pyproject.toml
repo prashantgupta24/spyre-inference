@@ -129,7 +129,7 @@ vllm = [
   { git = "https://github.com/vllm-project/vllm", rev = "v0.28.0" },
 ]
 # NFS kernel cache. Revert to upstream torch-spyre after validating.
-torch-spyre = { git = "https://github.com/prashantgupta24/torch-spyre", rev = "3189fd39cb002d9d1e4aa9d2e1d55f3f82413377" }
+torch-spyre = { git = "https://github.com/prashantgupta24/torch-spyre", rev = "1e6250c36da24a7a10651312212cc04610c2aa1a" }
 torch = [
   # Power has no prebuilt wheels on the pytorch-cpu index; build from source at the
   # tag matching the runtime pin. Everything else keeps the fast CPU-wheel path.
