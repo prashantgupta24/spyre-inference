@@ -811,31 +811,25 @@ jobs:
             total_bytes=$(du -sb "${SPYRE_SHARED_KERNEL_CACHE_DIR}" | cut -f1)
             total_human=$(du -sh "${SPYRE_SHARED_KERNEL_CACHE_DIR}" | cut -f1)
             echo "Shared kernel cache total: ${total_human} (${total_bytes} bytes)"
-            echo "### Shared Spyre kernel cache size" >> "$GITHUB_STEP_SUMMARY"
-            echo "- **Total:** ${total_human} (${total_bytes} bytes)" >> "$GITHUB_STEP_SUMMARY"
-            echo "- **Path:** \`${SPYRE_SHARED_KERNEL_CACHE_DIR}\`" >> "$GITHUB_STEP_SUMMARY"
-            echo "#### Per-cache-key size" >> "$GITHUB_STEP_SUMMARY"
-            for key_dir in "${SPYRE_SHARED_KERNEL_CACHE_DIR}"/*/; do
-              [ -d "${key_dir}" ] || continue
-              key=$(basename "${key_dir}")
-              key_human=$(du -sh "${key_dir}" | cut -f1)
-              echo "- \`${key}\`: ${key_human}" >> "$GITHUB_STEP_SUMMARY"
-            done
-            echo '{"bytes":' "${total_bytes}" '}' > "${RUNNER_TEMP}/kernel-cache-size.json"
+            {
+              echo "### Shared Spyre kernel cache size"
+              echo "- **Total:** ${total_human} (${total_bytes} bytes)"
+              echo "- **Path:** \`${SPYRE_SHARED_KERNEL_CACHE_DIR}\`"
+              echo "#### Per-cache-key size"
+              for key_dir in "${SPYRE_SHARED_KERNEL_CACHE_DIR}"/*/; do
+                [ -d "${key_dir}" ] || continue
+                key=$(basename "${key_dir}")
+                key_human=$(du -sh "${key_dir}" | cut -f1)
+                echo "- \`${key}\`: ${key_human}"
+              done
+            } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "Shared kernel cache directory does not exist: ${SPYRE_SHARED_KERNEL_CACHE_DIR}"
-            echo "### Shared Spyre kernel cache size" >> "$GITHUB_STEP_SUMMARY"
-            echo "Cache directory does not exist." >> "$GITHUB_STEP_SUMMARY"
+            {
+              echo "### Shared Spyre kernel cache size"
+              echo "Cache directory does not exist."
+            } >> "$GITHUB_STEP_SUMMARY"
           fi
-
-      - name: Upload kernel-cache size artifact
-        if: ${{ hashFiles(format('{0}/kernel-cache-size.json', runner.temp)) != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: kernel-cache-size
-          path: ${{ runner.temp }}/kernel-cache-size.json
-          if-no-files-found: ignore
-          retention-days: 30
 
   # ---------------------------------------------------------------------------
   # Coverage fan-in: combine every job's data into one report. Stock runner
